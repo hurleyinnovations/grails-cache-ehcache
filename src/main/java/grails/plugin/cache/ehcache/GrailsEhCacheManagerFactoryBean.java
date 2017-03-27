@@ -89,13 +89,13 @@ public class GrailsEhCacheManagerFactoryBean implements FactoryBean<CacheManager
 
 		InputStream inputStream;
 		if (configLocation == null) {
-			
+
 			if (cacheManagerName == null) {
 				logger.info("No custom cacheManagerName given, using default name 'grails-cache-ehcache'.");
 				// default name to not have multiple unnamed cache managers (because of hibernate)
 				cacheManagerName = "grails-cache-ehcache";
 			}
-			
+
 			// use dummy configuration for now, will be done for real via rebuild()
 			String dummyXml =
 					"<ehcache name='" + cacheManagerName + "' updateCheck='false'>" +
@@ -162,19 +162,19 @@ public class GrailsEhCacheManagerFactoryBean implements FactoryBean<CacheManager
 
 			status = Status.STATUS_UNINITIALISED;
 
-//            Field diskStorePathManager = ReflectionUtils.findField(CacheManager.class, "diskStorePathManager", net.sf.ehcache.DiskStorePathManager.class);
-//			ReflectionUtils.makeAccessible(diskStorePathManager);
-//			ReflectionUtils.setField(diskStorePathManager, this, null);
+            Field diskStorePathManager = ReflectionUtils.findField(CacheManager.class, "diskStorePathManager", net.sf.ehcache.DiskStorePathManager.class);
+			ReflectionUtils.makeAccessible(diskStorePathManager);
+			ReflectionUtils.setField(diskStorePathManager, this, null);
 
-//			@SuppressWarnings("unchecked")
-//			Map<CacheManager, String> CACHE_MANAGERS_REVERSE_MAP = (Map<CacheManager, String>)getStaticValue(findField("CACHE_MANAGERS_REVERSE_MAP"));
-//			final String name = CACHE_MANAGERS_REVERSE_MAP.remove(this);
-//			@SuppressWarnings("unchecked")
-//			Map<String, CacheManager> CACHE_MANAGERS_MAP = (Map<String, CacheManager>)getStaticValue(findField("CACHE_MANAGERS_MAP"));
-//			CACHE_MANAGERS_MAP.remove(name);
+			@SuppressWarnings("unchecked")
+			Map<CacheManager, String> CACHE_MANAGERS_REVERSE_MAP = (Map<CacheManager, String>)getStaticValue(findField("CACHE_MANAGERS_REVERSE_MAP"));
+			final String name = CACHE_MANAGERS_REVERSE_MAP.remove(this);
+			@SuppressWarnings("unchecked")
+			Map<String, CacheManager> CACHE_MANAGERS_MAP = (Map<String, CacheManager>)getStaticValue(findField("CACHE_MANAGERS_MAP"));
+			CACHE_MANAGERS_MAP.remove(name);
 
 			// remove since it's going to be re-added
-//			ALL_CACHE_MANAGERS.remove(this);
+			ALL_CACHE_MANAGERS.remove(this);
 
 			init(null, null, null, location.getInputStream());
 		}
