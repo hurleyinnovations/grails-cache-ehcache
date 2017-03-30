@@ -107,7 +107,7 @@ class EhcacheConfigBuilder extends BuilderSupport {
 
 	protected static final List RMI_CACHE_MANAGER_PARAM_NAMES = [
 		'env', 'factoryType', 'multicastGroupAddress', 'multicastGroupPort',
-		'timeToLive', 'className', 'rmiUrl', 'hostName']
+		'timeToLive', 'className', 'rmiCache', 'rmiUrl', 'hostName']
 
 	protected static final List JGROUPS_CACHE_MANAGER_PARAM_NAMES = ['env', 'connect']
 
@@ -353,6 +353,9 @@ class EhcacheConfigBuilder extends BuilderSupport {
 				if ('rmiUrl' == name) {
 					addToList current, 'rmiUrls', value
 					return name
+				} else if ('rmiCache' == name) {
+					addToList current, 'rmiCaches', value
+					return name
 				}
 
 				// allow all properties for forward compatability
@@ -495,9 +498,14 @@ class EhcacheConfigBuilder extends BuilderSupport {
 
 		appendCache xml, 'defaultCache', defaultCache, env, cacheEventListenerFactoriesXml,
 			bootstrapCacheLoaderFactoriesXml, cacheExceptionHandlerFactoriesXml,
-			cacheLoaderFactoriesXml, cacheExtensionFactoriesXml, maxBytesLocalHeapSet
+			cacheLoaderFactoriesXml, cacheExtensionFactoriesXml, maxBytesLocalHeapSet, []
+
+		def distributedCaches = []
 
 		for (data in cacheManagerPeerProviderFactories) {
+			if (data.rmiCaches) {
+				distributedCaches.addAll(data.rmiCaches)
+			}
 			appendCacheManagerPeerProviderFactory xml, data, env
 		}
 
@@ -508,18 +516,18 @@ class EhcacheConfigBuilder extends BuilderSupport {
 		for (data in caches) {
 			appendCache xml, 'cache', data, env, cacheEventListenerFactoriesXml,
 				bootstrapCacheLoaderFactoriesXml, cacheExceptionHandlerFactoriesXml,
-				cacheLoaderFactoriesXml, cacheExtensionFactoriesXml, maxBytesLocalHeapSet
+				cacheLoaderFactoriesXml, cacheExtensionFactoriesXml, maxBytesLocalHeapSet, distributedCaches
 		}
 
 		xml.append(LF).append('</ehcache>').append LF
-
+		log.info(xml.toString())
 		xml.toString()
 	}
 
 	protected void appendCache(StringBuilder xml, String type, Map data, String env,
 			Map cacheEventListenerFactoriesXml, Map bootstrapCacheLoaderFactoriesXml,
 			Map cacheExceptionHandlerFactoriesXml, Map cacheLoaderFactoriesXml,
-			Map cacheExtensionFactoriesXml, boolean maxBytesLocalHeapSet) {
+			Map cacheExtensionFactoriesXml, boolean maxBytesLocalHeapSet, distributedCaches) {
 
 		if (data.domain) {
 			// collection
@@ -557,7 +565,9 @@ class EhcacheConfigBuilder extends BuilderSupport {
 		}
 
 		StringBuilder children = new StringBuilder()
-		appendFactoryXmls children, cacheEventListenerFactoryNames, cacheEventListenerFactoriesXml
+		if (distributedCaches.contains(name)) {
+			appendFactoryXmls children, cacheEventListenerFactoryNames, cacheEventListenerFactoriesXml
+		}
 		appendFactoryXmls children, bootstrapCacheLoaderFactoryNames, bootstrapCacheLoaderFactoriesXml
 		appendFactoryXmls children, cacheExceptionHandlerFactoryNames, cacheExceptionHandlerFactoriesXml
 		appendFactoryXmls children, cacheLoaderFactoryNames, cacheLoaderFactoriesXml
@@ -593,9 +603,24 @@ class EhcacheConfigBuilder extends BuilderSupport {
 		switch (type) {
 			case 'rmi':
 				def rmiUrls = data.rmiUrls
-				if (rmiUrls) {
+				def rmiCaches = data.rmiCaches
+				def ip = getLocalHostLANAddress().getHostAddress()
+				if (rmiUrls && rmiCaches) {
+					// rmiUrls will contain a list of server urls and ports e.g. //192.168.1.10:4001/
+					// Combine these with rmiCaches, the list of caches that should be distributed to create
+					// a new string e.g. //192.168.1.10:4001/provider|//192.168.1.10:4001/nhs
+					def finalUrls = []
+					rmiCaches.each { cache ->
+						rmiUrls.each { url ->
+							// Ignore our own IP address
+							if (url.indexOf(ip) == -1) {
+								finalUrls.push("${url}${cache}")
+							}
+						}
+					}
+
 					data.peerDiscovery = 'manual'
-					data.rmiUrls = rmiUrls.join('|')
+					data.rmiUrls = finalUrls.join('|')
 				}
 				else {
 					data.peerDiscovery = 'automatic'
@@ -620,7 +645,7 @@ class EhcacheConfigBuilder extends BuilderSupport {
 	protected void appendCacheManagerPeerProviderFactoryNode(StringBuilder xml, Map data,
 			String delimiter, String className) {
 
-		String properties = joinProperties(data, delimiter, ['className', 'factoryType'])
+		String properties = joinProperties(data, delimiter, ['className', 'factoryType', 'rmiCaches'])
 		appendSimpleNodeWithProperties xml, 'cacheManagerPeerProviderFactory', className, properties, delimiter
 	}
 
@@ -841,6 +866,51 @@ class EhcacheConfigBuilder extends BuilderSupport {
 			if (type && !data.className) {
 				data.className = classNames[type]
 			}
+		}
+	}
+
+	protected static InetAddress getLocalHostLANAddress() throws UnknownHostException {
+		try {
+			InetAddress candidateAddress = null;
+			// Iterate all NICs (network interface cards)...
+			for (Enumeration ifaces = NetworkInterface.getNetworkInterfaces(); ifaces.hasMoreElements(); ) {
+				NetworkInterface iface = (NetworkInterface) ifaces.nextElement();
+				// Iterate all IP addresses assigned to each card...
+				for (Enumeration inetAddrs = iface.getInetAddresses(); inetAddrs.hasMoreElements(); ) {
+					InetAddress inetAddr = (InetAddress) inetAddrs.nextElement();
+					if (!inetAddr.isLoopbackAddress()) {
+
+						if (inetAddr.isSiteLocalAddress()) {
+							// Found non-loopback site-local address. Return it immediately...
+							return inetAddr;
+						} else if (candidateAddress == null) {
+							// Found non-loopback address, but not necessarily site-local.
+							// Store it as a candidate to be returned if site-local address is not subsequently found...
+							candidateAddress = inetAddr;
+							// Note that we don't repeatedly assign non-loopback non-site-local addresses as candidates,
+							// only the first. For subsequent iterations, candidate will be non-null.
+						}
+					}
+				}
+			}
+			if (candidateAddress != null) {
+				// We did not find a site-local address, but we found some other non-loopback address.
+				// Server might have a non-site-local address assigned to its NIC (or it might be running
+				// IPv6 which deprecates the "site-local" concept).
+				// Return this non-loopback candidate address...
+				return candidateAddress;
+			}
+			// At this point, we did not find a non-loopback address.
+			// Fall back to returning whatever InetAddress.getLocalHost() returns...
+			InetAddress jdkSuppliedAddress = InetAddress.getLocalHost();
+			if (jdkSuppliedAddress == null) {
+				throw new UnknownHostException("The JDK InetAddress.getLocalHost() method unexpectedly returned null.");
+			}
+			return jdkSuppliedAddress;
+		} catch (Exception e) {
+			UnknownHostException unknownHostException = new UnknownHostException("Failed to determine LAN address: " + e);
+			unknownHostException.initCause(e);
+			throw unknownHostException;
 		}
 	}
 }
