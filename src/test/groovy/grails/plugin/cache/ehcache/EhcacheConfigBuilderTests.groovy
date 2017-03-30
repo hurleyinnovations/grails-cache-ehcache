@@ -400,6 +400,7 @@ class EhcacheConfigBuilderTests {
 				multicastGroupAddress '${ehcacheMulticastGroupAddress}'// '237.0.0.2'
 				multicastGroupPort '${ehcacheMulticastGroupPort}'// 5557
 				timeToLive 'subnet'
+				rmiCache 'com.foo.Book'
 			}
 
 			cacheManagerPeerListenerFactory {
